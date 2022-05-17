@@ -2,9 +2,9 @@ data "aws_ami" "amazon_ubuntu" {
   owners = ["099720109477"] # Canonical (Creators of Ubuntu)
 
   filter {
-    name = "id"
-    # AWS Marketplace - Canonical, Ubuntu, 22.04 LTS, amd64 jammy image build on 2022-04-20 (Free tier)
-    values = ["ami-09d56f8956ab235b3"]
+    name = "image-id"
+    # AWS Marketplace - Canonical, Ubuntu, 20.04 LTS (Free tier)
+    values = ["ami-02584c1c9d05efa69"]
   }
 }
 
@@ -24,16 +24,21 @@ module "security_group" {
   vpc_id      = module.vpc.vpc_id
 
   ingress_cidr_blocks = ["0.0.0.0/0"]
-  ingress_rules       = ["http-80-tcp", "ssh", "all-icmp"]
+  ingress_rules       = ["http-80-tcp", "ssh-tcp", "all-icmp"]
+
   egress_rules        = ["all-all"]
 
   tags = local.tags
 }
 
+resource "tls_private_key" "ghost" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
 
-resource "aws_key_pair" "ec2_keypair" {
+resource "aws_key_pair" "ghost" {
   key_name   = "${local.name}-keypair"
-  public_key = var.ec2_keypair
+  public_key = tls_private_key.ghost.public_key_openssh
 }
 
 module "ec2" {
@@ -44,7 +49,7 @@ module "ec2" {
 
   ami                         = data.aws_ami.amazon_ubuntu.image_id
   instance_type               = var.ec2_instance_type
-  key_name                    = aws_key_pair.ec2_keypair.key_name
+  key_name                    = aws_key_pair.ghost.key_name
   monitoring                  = true
   vpc_security_group_ids      = [module.security_group.security_group_id]
   subnet_id                   = module.vpc.public_subnets[0]
@@ -55,22 +60,12 @@ module "ec2" {
 
   enable_volume_tags = true
 
-  root_block_device = [
-    {
-      encrypted   = true
-      volume_type = "gp3"
-      throughput  = 200
-      volume_size = 50
-      tags        = local.tags
-    },
-  ]
-
   ebs_block_device = [
     {
-      device_name = "/dev/sdf"
+      device_name = "/dev/sda1"
       volume_type = "gp3"
-      volume_size = 5
-      throughput  = 200
+      volume_size = 8
+      throughput  = 125 
       encrypted   = true
       kms_key_id  = aws_kms_key.ghost.arn
     }

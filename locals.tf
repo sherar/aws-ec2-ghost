@@ -3,6 +3,6 @@ locals {
   tags = {
     Application = "AWS Ghost"
     Environment = "Development"
-    Teaam       = "TechOps"
+    Team       = "TechOps"
   }
 }

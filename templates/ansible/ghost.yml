@@ -1,0 +1,93 @@
+- name: "Setups Ghost app"
+  hosts: localhost
+  connection: local 
+  become: true
+  tasks:
+  - name: "apt-get update"
+    apt:
+      update_cache: yes
+      cache_valid_time: 3600
+
+  - name: "Create a ghostadmin user"
+    user:
+      name: ghostadmin
+      groups:
+        - sudo
+      state: present
+      shell: /bin/bash
+      system:
+      createhome: yes
+      home: /home/ghostadmin
+
+  - name: Installing dependencies
+    package:
+      name: "{{item}}"
+      state: present
+      update_cache: yes
+    loop:
+      - mysql-server
+      - mysql-client 
+      - python3-mysqldb
+      - libmysqlclient-dev
+      - npm
+    become: yes
+
+  - name: Start and enable mysql service
+    service:
+      name: mysql
+      state: started
+      enabled: yes
+
+  - name: Creating mysql user
+    mysql_user:
+      name: "ghostadmin"
+      password: "ghostadmin"
+      priv: 'ghost.*:ALL'
+      host: '%'
+      state: present
+
+# If you’re running Ubuntu 18.04 or 20.04, a password is required to ensure MySQL is compatible with Ghost-CLI
+  - name: Set root user password
+    mysql_user: name=root
+                host="localhost"
+                password="ghostadmin"
+                check_implicit_admin=yes
+                login_user="ghostadmin"
+                login_password="ghostadmin"
+                state=present
+
+  - name: "Install NodeJS dependencies"
+    become: true
+    shell:  |
+      curl -s https://deb.nodesource.com/setup_16.x | sudo bash
+
+  - name: "Install NodeJS"
+    apt:
+      name: nodejs
+      state: latest
+
+  - name: "Install ghost-cli package"
+    community.general.npm:
+      name: ghost-cli
+      version: "1.19.3"
+      global: yes
+
+  - name: Create ghostadmin directory 
+    ansible.builtin.file:
+      path: /var/www/ghost
+      owner: ghostadmin
+      group: ghostadmin
+      state: directory
+      mode: '0775'
+
+  - name: "Install Ghost"
+    shell:  |
+      cd /var/www/ghost
+      ghost install --url http://127.0.0.1 --port 2368 --no-setup-ssl --db mysql --dbhost localhost --dbuser root --dbpass ghostadmin  --process systemd --start --no-setup-nginx --setup-mysql --dbname ghost_prod --no-prompt
+
+  - name: "Example cronjob"
+    ansible.builtin.cron:
+      name: "MySQL backups"
+      minute: "0"
+      hour: "12"
+      job: 'mysqldump -h localhost -u ghostadmin -p ghostadmin | gzip > /backup/mysql-$(date "+%d_%m_%Y__%H_%M_%S").zip '
